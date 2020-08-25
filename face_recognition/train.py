@@ -33,21 +33,21 @@ def parse_args():
                        required=False,
                        default=False,
                        type=str)
-    parse.add_argument('--name',
-                       help='set model_checkpoint name if want',
+    parse.add_argument('--save',
+                       help='save model',
                        required=False,
-                       default='1',
-                       type=str)
+                       default=False,
+                       type=bool)
     parse.add_argument('--epoch',
                        help='set epoch for train',
                        required=False,
                        default=10,
-                       type=str)
+                       type=int)
     parse.add_argument('--early_stop',
                        help='use early stop if set number > 0',
                        required=False,
                        default=0,
-                       type=str)
+                       type=int)
     parse.add_argument('--model',
                        help='path to pretrain model_checkpoint',
                        required=False,
@@ -94,10 +94,10 @@ class MakeData:
 
 
 class TrainModel:
-    def __init__(self, save_name=None, epoch=15, weights=None, early_stop=0):
+    def __init__(self, epoch=15, weights=None, early_stop=0, is_save=False):
         if weights is None:
             weights = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
-        self.save_dir = '/face_detection_opencv/face_matching/deeplearning/model_checkpoint'
+        self.save_dir = 'deeplearning/model_checkpoint'
         self.epoch = epoch
         self.weight = weights
         self.model = FaceClassify().to(device)
@@ -106,7 +106,7 @@ class TrainModel:
         self.dataset = MakeData()
         self.train_losses = []
         self.valid_losses = []
-        self.save_name = save_name
+        self.is_save = is_save
         self.loss = 100000
         self.early_stop = early_stop
         self.best_model_dict = {}
@@ -135,12 +135,13 @@ class TrainModel:
             acc = 100 * correct / total
             print('Test Accuracy: {} %'.format(acc))
 
-    def save_model(self, name='1'):
-        torch.save(self.model.state_dict(), os.path.join(self.save_dir, 'model_{}.ckpt'.format(str(name))))
+    def save_model(self):
+        torch.save(self.model.state_dict(), os.path.join(self.save_dir, 'model_{}.ckpt'.format(str(self.loss))))
 
     def train(self):
         anchor = 0
         train_loader, valid_loader = MakeData().make_loader()
+        print('Start train')
         for epoch in range(1, self.epoch + 1):
             train_loss = 0.0
             valid_loss = 0.0
@@ -190,13 +191,14 @@ class TrainModel:
                 epoch, train_loss, valid_loss))
         self.predict(valid_loader)
         self.plot_loss()
-        if not self.save_name:
-            self.save_model(self.save_name)
+        if self.is_save:
+            self.save_model()
 
 
 def evaluate_model(path2model, path2test, label):
     model = FaceClassify()
     model.load_state_dict(torch.load(path2model))
+    model.to(device)
     print('Load model_checkpoint done')
     test = create_data(path2data=path2test, labels=label)
     test_data = FaceDataset(test, transform=normalize)
@@ -222,7 +224,7 @@ def main():
     args = parse_args()
 
     if args.is_train == 'True':
-        TrainModel(save_name=args.name, epoch=args.epoch, early_stop=args.early_stop).train()
+        TrainModel(is_save=args.save, epoch=args.epoch, early_stop=args.early_stop).train()
     else:
         evaluate_model(path2model=args.model, path2test=args.test_data, label=args.test_label)
 

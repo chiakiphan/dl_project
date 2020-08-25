@@ -1,9 +1,11 @@
 import torch
 import cv2
+import os
 from facenet_pytorch import MTCNN
 from train import FaceClassify, get_normalize
 from dataset import get_name
 from PIL import Image
+from skimage.measure import compare_ssim
 
 
 def draw_bbox(image, coord, color, text=''):
@@ -13,7 +15,7 @@ def draw_bbox(image, coord, color, text=''):
                           (x + w, y + h),
                           color=color,
                           thickness=2)
-    image = cv2.putText(image, str(text), (x+10, y+h+10), cv2.FONT_HERSHEY_COMPLEX, 0.5, [0, 255, 0], 1)
+    image = cv2.putText(image, str(text), (x + 10, y + h + 10), cv2.FONT_HERSHEY_COMPLEX, 0.5, [0, 255, 0], 1)
     return image
 
 
@@ -56,53 +58,57 @@ def predict_video(link_video, model=None, speed=1, save_result=None):
     writer = cv2.VideoWriter(save_result, fourcc, 20.0, (640, 480))
     anchor = None
     bbox = []
-    flag = False
+    flag = True
     while cap.isOpened():
         ret, frame = cap.read()
         frame_rate = cap.get(1)
-
         frame = cv2.resize(frame, (640, 480))
-        for _, coord in get_face(frame):
-            draw_bbox(frame, coord, color[0])
-            bbox.append(coord)
-            flag = True
         if flag:
-            anchor = calculate_histogram(frame)
-        else:
             flag = False
-            if anchor is None:
-                continue
+            anchor = frame
+            for idx, (_, coord) in enumerate(get_face(frame)):
+                if idx == 0:
+                    bbox = []
+                    anchor = frame
+                    flag = True
+                draw_bbox(frame, coord, color[0])
+                bbox.append(coord)
+        else:
+            (score, _) = compare_ssim(cv2.cvtColor(anchor, cv2.COLOR_BGR2GRAY),
+                                      cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY),
+                                      full=True)
+            if score > 0.90:
+                cv2.putText(frame, str(score), (30, 30), cv2.FONT_HERSHEY_COMPLEX, 1, [0, 0, 255], 2)
+                if len(bbox) > 0:
+                    for c in bbox:
+                        draw_bbox(frame, c, color=color[4])
             else:
-                hist = calculate_histogram(frame)
-                corr = cv2.compareHist(hist, anchor, cv2.HISTCMP_CORREL)
-                cv2.putText(frame, str(corr), (30, 30), cv2.FONT_HERSHEY_COMPLEX, 1, [0, 0, 255], 2)
-            if corr > 0.99:
-                for c in bbox:
-                    draw_bbox(frame, c, color=color[4])
+                bbox = []
+                flag = True
         cv2.imshow("video", frame)
         if save_result:
             writer.write(frame)
         # if frame_rate % speed == 0:
 
-            # for face, coord in get_face(frame):
+        # for face, coord in get_face(frame):
 
-                # face = cv2.cvtColor(face, cv2.COLOR_BGR2RGB)
-                # feature = get_feature(face)
-                # with torch.no_grad():
-                #     label = model_checkpoint(feature)
-                #     score = torch.nn.functional.softmax(label)
-                #     _, predicted = torch.max(label.data, 1)
-                #     predicted = predicted.item()
-                #     print(score[0][predicted])
-                #     # if predicted == 8 and score[0][predicted] < 0.92:
-                #     #     continue
-                #     # if score[0][predicted] < 0.8:
-                #     #     continue
-                # if predicted not in [4, 8]:
-                #     # name = names[predicted]
-                #     predicted = 0
+        # face = cv2.cvtColor(face, cv2.COLOR_BGR2RGB)
+        # feature = get_feature(face)
+        # with torch.no_grad():
+        #     label = model_checkpoint(feature)
+        #     score = torch.nn.functional.softmax(label)
+        #     _, predicted = torch.max(label.data, 1)
+        #     predicted = predicted.item()
+        #     print(score[0][predicted])
+        #     # if predicted == 8 and score[0][predicted] < 0.92:
+        #     #     continue
+        #     # if score[0][predicted] < 0.8:
+        #     #     continue
+        # if predicted not in [4, 8]:
+        #     # name = names[predicted]
+        #     predicted = 0
 
-                # draw_bbox(frame, coord, color[0])
+        # draw_bbox(frame, coord, color[0])
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
@@ -123,7 +129,7 @@ def predict_image(image, model):
 
 def main():
     model_save = '/home/kpst/PycharmProjects/face_classify_torch/face_detection_opencv/face_matching/deeplearning' \
-                 '/model_checkpoint/model_checkpoint=80.61224489795919.ckpt'
+                 '/model_checkpoint/model=80.61224489795919.ckpt'
     video_link = '/home/kpst/Downloads/test_video.mp4'
     save = '/home/kpst/PycharmProjects/face_classify_torch/face_detection_opencv/video/output_detect.avi'
     model = load_model(model_save)
