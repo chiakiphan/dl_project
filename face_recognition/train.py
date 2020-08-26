@@ -4,16 +4,27 @@ from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 from ToEmbeding import ToEmbeding
 from torch import nn
-from dataset import create_data
+from dataset import create_data, get_name
 from model import FaceClassify
 import torch
 import os
 import matplotlib.pyplot as plt
 import numpy as np
 import argparse
+import torch.backends.cudnn as cudnn
 
-device = torch.device('cuda:0')
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 normalize = transforms.Compose([
+    Resize((224, 224)),
+    ToTensor(),
+    Normalize(mean=[0.485, 0.456, 0.406],
+              std=[0.229, 0.224, 0.225]),
+    ToEmbeding()
+])
+
+train_normalize = transforms.Compose([
+    transforms.RandomHorizontalFlip(),
+    transforms.RandomRotation(0.2),
     Resize((224, 224)),
     ToTensor(),
     Normalize(mean=[0.485, 0.456, 0.406],
@@ -61,7 +72,9 @@ def parse_args():
     parse.add_argument('--test_label',
                        help='config label for test',
                        required=False,
-                       default=[4, 8])
+                       default=[4, 8],
+                       nargs='+',
+                       type=int)
     args = parse.parse_args()
     return args
 
@@ -72,23 +85,21 @@ class MakeData:
         self.df = create_data(labels=self.num_class)
         train, valid = train_test_split(self.df, test_size=0.2, random_state=96, shuffle=True)
         self.valid_data = FaceDataset(valid, transform=normalize)
-        self.train_data = FaceDataset(train, transform=normalize)
+        self.train_data = FaceDataset(train, transform=train_normalize)
 
     def get_len(self):
         return len(self.train_data), len(self.valid_data)
 
     def make_loader(self):
         train_loader = DataLoader(dataset=self.train_data,
-                                  batch_size=32,
+                                  batch_size=64,
                                   shuffle=True,
-                                  num_workers=4,
-                                  pin_memory=True)
+                                  num_workers=2)
 
         valid_loader = DataLoader(dataset=self.valid_data,
-                                  batch_size=32,
+                                  batch_size=64,
                                   shuffle=True,
-                                  num_workers=4,
-                                  pin_memory=True)
+                                  num_workers=2)
 
         return train_loader, valid_loader
 
@@ -96,12 +107,16 @@ class MakeData:
 class TrainModel:
     def __init__(self, epoch=15, weights=None, early_stop=0, is_save=False):
         if weights is None:
-            weights = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+            weights = [1.0, 1.0, 1.0, 2.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0]
         self.save_dir = 'deeplearning/model_checkpoint'
         self.epoch = epoch
         self.weight = weights
-        self.model = FaceClassify().to(device)
-        self.criterion = nn.CrossEntropyLoss(weight=torch.FloatTensor(self.weight).cuda())
+        classify = FaceClassify()
+        classify = classify.to(device)
+        if device == 'cuda':
+            self.model = torch.nn.DataParallel(classify)
+            cudnn.benchmark = True
+        self.criterion = nn.CrossEntropyLoss(weight=torch.FloatTensor(weights).cuda())
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001)
         self.dataset = MakeData()
         self.train_losses = []
@@ -140,8 +155,9 @@ class TrainModel:
 
     def train(self):
         anchor = 0
+        print('==> Preparing data..')
         train_loader, valid_loader = MakeData().make_loader()
-        print('Start train')
+        print('==> Start train...')
         for epoch in range(1, self.epoch + 1):
             train_loss = 0.0
             valid_loss = 0.0
@@ -150,7 +166,6 @@ class TrainModel:
                 target = target.type(torch.LongTensor)
                 data = data.to(device)
                 target = target.to(device)
-
                 self.optimizer.zero_grad()
                 output = self.model(data)
                 output = torch.squeeze(output, 1)
@@ -197,6 +212,7 @@ class TrainModel:
 
 def evaluate_model(path2model, path2test, label):
     model = FaceClassify()
+    model = torch.nn.DataParallel(model)
     model.load_state_dict(torch.load(path2model))
     model.to(device)
     print('Load model_checkpoint done')
@@ -216,16 +232,16 @@ def evaluate_model(path2model, path2test, label):
             print(predicted, label)
             total[label] += 1
             correct[label] += (predicted == label)
-        acc = 100*correct/total
+        acc = 100 * correct / total
     print('Acc: {}%'.format(acc))
 
 
 def main():
     args = parse_args()
-
     if args.is_train == 'True':
         TrainModel(is_save=args.save, epoch=args.epoch, early_stop=args.early_stop).train()
     else:
+        print(get_name())
         evaluate_model(path2model=args.model, path2test=args.test_data, label=args.test_label)
 
 
