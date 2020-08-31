@@ -15,7 +15,7 @@ import torch.backends.cudnn as cudnn
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 normalize = transforms.Compose([
-    Resize((224, 224)),
+    Resize((160, 160)),
     ToTensor(),
     Normalize(mean=[0.485, 0.456, 0.406],
               std=[0.229, 0.224, 0.225]),
@@ -25,7 +25,7 @@ normalize = transforms.Compose([
 train_normalize = transforms.Compose([
     transforms.RandomHorizontalFlip(),
     transforms.RandomRotation(0.2),
-    Resize((224, 224)),
+    Resize((160, 160)),
     ToTensor(),
     Normalize(mean=[0.485, 0.456, 0.406],
               std=[0.229, 0.224, 0.225]),
@@ -39,7 +39,7 @@ def get_normalize():
 
 def parse_args():
     parse = argparse.ArgumentParser()
-    parse.add_argument('--is_train',
+    parse.add_argument('--train',
                        help='is train model_checkpoint: True or False',
                        required=False,
                        default=False,
@@ -67,7 +67,7 @@ def parse_args():
     parse.add_argument('--test_data',
                        help='path to test data',
                        required=False,
-                       default='video/raw',
+                       default='video/raw/test1',
                        type=str)
     parse.add_argument('--test_label',
                        help='config label for test',
@@ -112,10 +112,7 @@ class TrainModel:
         self.epoch = epoch
         self.weight = weights
         classify = FaceClassify()
-        classify = classify.to(device)
-        if device == 'cuda':
-            self.model = torch.nn.DataParallel(classify)
-            cudnn.benchmark = True
+        self.model = classify.to(device)
         self.criterion = nn.CrossEntropyLoss(weight=torch.FloatTensor(weights).cuda())
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001)
         self.dataset = MakeData()
@@ -212,7 +209,7 @@ class TrainModel:
 
 def evaluate_model(path2model, path2test, label):
     model = FaceClassify()
-    model = torch.nn.DataParallel(model)
+    # model = torch.nn.DataParallel(model)
     model.load_state_dict(torch.load(path2model))
     model.to(device)
     print('Load model_checkpoint done')
@@ -223,13 +220,13 @@ def evaluate_model(path2model, path2test, label):
     with torch.no_grad():
         correct = np.zeros(10)
         total = np.ones(10)
-        for feature, label in test_data:
+        for i, (feature, label) in enumerate(test_data):
             feature = feature.to(device)
             predicted = model(feature)
             predicted = torch.squeeze(predicted, 1)
             predicted = torch.argmax(predicted.data, 1)
             predicted = predicted.data[0].cpu().numpy()
-            print(predicted, label)
+            print(test['path'][i], predicted, label)
             total[label] += 1
             correct[label] += (predicted == label)
         acc = 100 * correct / total
@@ -238,7 +235,7 @@ def evaluate_model(path2model, path2test, label):
 
 def main():
     args = parse_args()
-    if args.is_train == 'True':
+    if args.train == 'True':
         TrainModel(is_save=args.save, epoch=args.epoch, early_stop=args.early_stop).train()
     else:
         print(get_name())

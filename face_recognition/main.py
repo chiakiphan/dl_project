@@ -6,6 +6,9 @@ from train import FaceClassify, get_normalize
 from dataset import get_name
 from PIL import Image
 from skimage.measure import compare_ssim
+from sklearn.preprocessing import Normalizer
+import pickle
+import numpy as np
 
 
 def draw_bbox(image, coord, color, text=''):
@@ -39,10 +42,20 @@ def get_feature(image):
 
 def load_model(model_save):
     model = FaceClassify()
-    # model = torch.nn.DataParallel(model)
     model.load_state_dict(torch.load(model_save))
     model.eval()
     return model
+
+
+def load_model_svm(model_save):
+    model = pickle.load(open(model_save, 'rb'))
+    return model
+
+
+def get_feature_svm(image):
+    feature = get_feature(image).numpy()
+    feature = Normalizer(norm='l2').transform(feature)
+    return feature
 
 
 def calculate_histogram(img):
@@ -64,34 +77,35 @@ def predict_video(link_video, model=None, speed=1, save_result=None):
         ret, frame = cap.read()
         frame_rate = cap.get(1)
         frame = cv2.resize(frame, (640, 480))
-        # if frame_rate>1330:
         if flag:
-            flag = True
+            flag = False
             anchor = frame
             for idx, (face, coord) in enumerate(get_face(frame)):
+                draw_bbox(frame, coord, [200, 0, 200], '')
+                if coord[2] + coord[3] < 90:
+                    continue
                 if idx == 0:
                     bbox = []
                     anchor = frame
-                    # flag = True
                 acc, label = predict_image(face, model)
+                # acc, label = predict_image_svm(face, model)
                 cv2.putText(frame, '%.2f | %d | %d' % (acc, label, frame_rate), (30, 30), cv2.FONT_HERSHEY_COMPLEX, 1,
                             [0, 255, 0],
                             2)
-                print('acc %.3f %d'%(acc, frame_rate))
                 if label in [3, 4]:
-                    if acc > 0.8:
+                    print('acc %.3f %d' % (acc, frame_rate))
+                    if acc > 0.5:
                         draw_bbox(frame, coord, color[label], text=names[label])
                         bbox.append((label, coord))
-            print('anchor {}'.format(frame_rate))
+            # print('anchor {}'.format(frame_rate))
         else:
-            score = compare_ssim(cv2.cvtColor(anchor, cv2.COLOR_BGR2GRAY),
-                                 cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY),
+            score = compare_ssim(cv2.cvtColor(anchor[320:640, :], cv2.COLOR_BGR2GRAY),
+                                 cv2.cvtColor(frame[320:640, :], cv2.COLOR_BGR2GRAY),
                                  full=False)
-            print('socre %.3f, %d'%(score, frame_rate))
+            # print('socre %.3f, %d' % (score, frame_rate))
             if score > 0.78:
                 cv2.putText(frame, '{}'.format(frame_rate), (30, 30), cv2.FONT_HERSHEY_COMPLEX, 1, [0, 0, 255],
                             2)
-
                 if len(bbox) > 0:
                     for id, face in bbox:
                         draw_bbox(frame, face, color=color[id], text=names[id])
@@ -119,6 +133,12 @@ def predict_image(image, model):
     return score.item(), predicted.item()
 
 
+def predict_image_svm(image, model):
+    feature = get_feature_svm(image)
+    pred = model.predict_proba(feature)
+    return np.max(pred, 1).item(), np.argmax(pred, 1).item()
+
+
 def ssmi(img1, img2):
     score = compare_ssim(img1, img2)
     return score
@@ -126,30 +146,36 @@ def ssmi(img1, img2):
 
 def main():
     model_save = '/home/kpst/PycharmProjects/face_classify_torch/face_detection_opencv/face_matching/deeplearning' \
-                 '/model_checkpoint/model_22.954469680786133.ckpt'
+                 '/model_checkpoint/model_6.321091677993536.ckpt'
+    svm_model = '/home/kpst/PycharmProjects/face_classify_torch/face_detection_opencv/face_matching/deeplearning' \
+                '/model_checkpoint/model.ml'
     video_link = '/home/kpst/Downloads/test_video.mp4'
-    save = '/home/kpst/PycharmProjects/face_classify_torch/face_detection_opencv/video/output_detect_1.avi'
+    save = '/home/kpst/PycharmProjects/face_classify_torch/face_detection_opencv/video/output.avi'
     model = load_model(model_save)
     predict_video(video_link, model, speed=1, save_result=save)
-    # img = cv2.imread('/home/kpst/PycharmProjects/face_classify_torch/face_detection_opencv/face_matching/image/lee bo '
-    #                  'young/lee bo young37.png')
+    # svm = load_model_svm(svm_model)
+    # predict_video(video_link, svm, speed=1, save_result=save)
+    # img = cv2.imread('/home/kpst/PycharmProjects/face_classify_torch/face_detection_opencv/face_matching/video/test'
+    #                  '/1338.0.png')
     # for face, _ in get_face(img):
-    #     predict_image(face, model_checkpoint)
+    #     s, a = predict_image(face, model)
 
 
 if __name__ == '__main__':
     main()
-    from facenet_pytorch import MTCNN
-    import time
 
-    anchor = cv2.imread(
-        '/home/kpst/PycharmProjects/face_classify_torch/face_detection_opencv/face_matching/video/test/1338.0.png', 0)
-    s = time.time()
-    for i in range(37, 60):
-        link = '/home/kpst/PycharmProjects/face_classify_torch/face_detection_opencv/face_matching/video/test/13{}.0.png'.format(
-            i)
-        img = cv2.imread(link, 0)
-        print(str(i)+':', ssmi(anchor, img))
-        # print(str(i) + ':', MTCNN().detect(img))
-    e = time.time()
-    print('time: {}'.format((e - s) * 1000))
+    # from facenet_pytorch import MTCNN
+    # import time
+    # import matplotlib.pyplot as plt
+    # anchor = cv2.imread(
+    #     '/home/kpst/PycharmProjects/face_classify_torch/face_detection_opencv/face_matching/video/test/1338.0.png', 0)
+    # s = time.time()
+    # for i in range(10, 28):
+    #     link = '/home/kpst/PycharmProjects/face_classify_torch/face_detection_opencv/face_matching/video/test/29{}.0.png'.format(
+    #         i)
+    #
+    #     img = cv2.imread(link)
+    #     # img = img[320:640, :]
+    #     # print(ssmi(anchor[320:640, :], img))
+    # e = time.time()
+    # print('time: {}'.format((e - s) * 1000))
